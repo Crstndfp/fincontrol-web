@@ -3,7 +3,7 @@ import { queryDb } from "@/lib/db";
 
 /**
  * Module 4.3: Categorization Keyword Rules Manager
- * Allows creating and reordering keyword rules (e.g. WALMART -> Supermercado / NEEDS_50)
+ * Allows creating, reordering, updating, and deleting keyword rules (e.g. WALMART -> Supermercado / NEEDS_50)
  */
 export async function POST(req: NextRequest) {
   try {
@@ -32,5 +32,21 @@ export async function POST(req: NextRequest) {
       { error: "Failed to create categorization rule" },
       { status: 500 }
     );
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const id = searchParams.get("id");
+
+    if (!id) {
+      return NextResponse.json({ error: "Rule ID is required" }, { status: 400 });
+    }
+
+    await queryDb(`DELETE FROM categorization_rules WHERE id = $1`, [id]);
+    return NextResponse.json({ success: true, deletedId: id });
+  } catch (error) {
+    return NextResponse.json({ error: "Failed to delete rule" }, { status: 500 });
   }
 }

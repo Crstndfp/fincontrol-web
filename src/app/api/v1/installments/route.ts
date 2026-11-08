@@ -77,7 +77,7 @@ export async function PATCH(req: NextRequest) {
     const body = await req.json();
     const { id, action } = body;
 
-    if (!id || action !== "ADVANCE_PAYMENT") {
+    if (!id || (action !== "ADVANCE_PAYMENT" && action !== "SETTLE_EARLY")) {
       return NextResponse.json({ error: "Invalid action or ID" }, { status: 400 });
     }
 
@@ -91,6 +91,21 @@ export async function PATCH(req: NextRequest) {
     }
 
     const plan = existing[0];
+
+    if (action === "SETTLE_EARLY") {
+      const updated = await queryDb(
+        `UPDATE installment_plans
+         SET paid_installments = total_installments,
+             remaining_balance = 0.00,
+             is_active = FALSE
+         WHERE id = $1
+         RETURNING *`,
+        [id]
+      );
+      return NextResponse.json({ installment: updated[0] });
+    }
+
+    // ADVANCE_PAYMENT
     const newPaid = plan.paid_installments + 1;
     const newRemaining = Math.max(0, plan.remaining_balance - plan.monthly_installment);
     const isActive = newPaid < plan.total_installments && newRemaining > 0;

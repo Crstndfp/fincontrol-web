@@ -47,3 +47,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Failed to create milestone" }, { status: 500 });
   }
 }
+
+export async function DELETE(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const id = searchParams.get("id");
+    if (!id) {
+      return NextResponse.json({ error: "Milestone ID is required" }, { status: 400 });
+    }
+    await queryDb(`DELETE FROM financial_milestones WHERE id = $1`, [id]);
+    return NextResponse.json({ success: true, deletedId: id });
+  } catch (error) {
+    return NextResponse.json({ error: "Failed to delete milestone" }, { status: 500 });
+  }
+}

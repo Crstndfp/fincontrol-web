@@ -24,6 +24,9 @@ import {
   Check,
   X,
   Plus,
+  Search,
+  Sparkles,
+  Save,
 } from "lucide-react";
 import {
   simulateMortgagePrepayment,
@@ -157,6 +160,7 @@ interface RuleItem {
   id: string;
   keyword_pattern: string;
   merchant_display_name: string;
+  category_id: string;
   category_name: string;
   macro_group: string;
   priority: number;
@@ -198,10 +202,13 @@ export default function FinControlDashboardPage() {
   const [milestones, setMilestones] = useState<MilestoneItem[]>([]);
   const [rules, setRules] = useState<RuleItem[]>([]);
 
-  // Mortgage Simulator State (Module 4.5 & Scenario 3)
+  // Loan State
+  const [customLoanBalance, setCustomLoanBalance] = useState<number>(685000);
+  const [customLoanRate, setCustomLoanRate] = useState<number>(7.5);
+  const [customLoanTerm, setCustomLoanTerm] = useState<number>(180);
   const [extraMonthlyAbono, setExtraMonthlyAbono] = useState<number>(1000);
 
-  // Mobile Express Simulator State (Modules 3.1, 3.2 & Scenario 1)
+  // Mobile Express Simulator State
   const [mobAmount, setMobAmount] = useState<string>("600");
   const [mobCurrency, setMobCurrency] = useState<"GTQ" | "USD">("GTQ");
   const [mobMerchant, setMobMerchant] = useState<string>("Restaurante San Martín");
@@ -212,18 +219,32 @@ export default function FinControlDashboardPage() {
   const [mobExactOwn, setMobExactOwn] = useState<string>("200");
   const [mobSubmitting, setMobSubmitting] = useState(false);
 
-  // New Rule Form State
+  // Categorization Rules Admin & Rule Tester
   const [newRulePattern, setNewRulePattern] = useState("");
   const [newRuleMerchant, setNewRuleMerchant] = useState("");
   const [newRuleCatId, setNewRuleCatId] = useState("");
+  const [testConceptInput, setTestConceptInput] = useState("");
 
-  // New Installment Plan Form State (Visa Cuotas)
+  // Category Budget Limit Quick Edit
+  const [editingBudgetCatId, setEditingBudgetCatId] = useState<string | null>(null);
+  const [tempBudgetVal, setTempBudgetVal] = useState<string>("");
+
+  // Statement Form State (Bimonetary Audit)
+  const [stPeriod, setStPeriod] = useState("Diciembre 2026");
+  const [stCutDate, setStCutDate] = useState("2026-12-18");
+  const [stDueDate, setStDueDate] = useState("2027-01-08");
+  const [stBalGtq, setStBalGtq] = useState("9500.00");
+  const [stBalUsd, setStBalUsd] = useState("120.00");
+  const [stPaidGtq, setStPaidGtq] = useState("9500.00");
+  const [stPaidUsd, setStPaidUsd] = useState("120.00");
+
+  // Visa Cuotas Form State
   const [newCuotaMerchant, setNewCuotaMerchant] = useState("");
   const [newCuotaDesc, setNewCuotaDesc] = useState("");
   const [newCuotaAmount, setNewCuotaAmount] = useState("");
   const [newCuotaMonths, setNewCuotaMonths] = useState("12");
 
-  // New Milestone Form State (Module 4.7)
+  // Milestones Form State
   const [newMsName, setNewMsName] = useState("");
   const [newMsMonth, setNewMsMonth] = useState("7");
   const [newMsKind, setNewMsKind] = useState<"INCOME_BONUS" | "ANNUAL_EXPENSE">("INCOME_BONUS");
@@ -236,7 +257,8 @@ export default function FinControlDashboardPage() {
   const [editSplitPct, setEditSplitPct] = useState(100);
   const [editMerchant, setEditMerchant] = useState("");
 
-  // Dropzone State
+  // Dropzone State & Filter
+  const [docFilter, setDocFilter] = useState<string>("ALL");
   const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
   const [uploadingDoc, setUploadingDoc] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -256,6 +278,12 @@ export default function FinControlDashboardPage() {
       setSnapshots(data.snapshots || []);
       setMilestones(data.milestones || []);
       setRules(data.rules || []);
+
+      if (data.loans?.length > 0) {
+        setCustomLoanBalance(Number(data.loans[0].current_principal_balance));
+        setCustomLoanRate(Number(data.loans[0].annual_interest_rate));
+        setCustomLoanTerm(Number(data.loans[0].remaining_term_months));
+      }
       if (data.documents?.length > 0 && !selectedDocId) {
         setSelectedDocId(data.documents[0].id);
       }
@@ -303,7 +331,6 @@ export default function FinControlDashboardPage() {
       .filter((a) => a.type === "LOAN")
       .reduce((acc, a) => acc + Math.abs(a.balance_gtq), 0);
 
-    // RN-01 & RN-02: Operational Expense only sums personal_amount_gtq and excludes INTERNAL_TRANSFER
     const monthlyPersonalExecutedGtq = transactions
       .filter((t) => t.type === "EXPENSE" || t.type === "LOAN_PAYMENT")
       .reduce((acc, t) => acc + t.personal_amount_gtq, 0);
@@ -338,24 +365,33 @@ export default function FinControlDashboardPage() {
   }, [accounts, transactions, categories]);
 
   // Mortgage Prepayment Simulation (Module 4.5 & Scenario 3)
-  const activeLoan = loans[0];
   const loanSimulation = useMemo(() => {
-    const balance = activeLoan ? activeLoan.current_principal_balance : 685000;
-    const rate = activeLoan ? activeLoan.annual_interest_rate : 7.5;
-    const months = activeLoan ? activeLoan.remaining_term_months : 180;
     const surplus = Math.max(
       1000,
       kpis.monthlyIncomeGtq - kpis.monthlyPersonalExecutedGtq
     );
 
     return simulateMortgagePrepayment({
-      currentPrincipalBalance: balance,
-      annualInterestRatePercent: rate,
-      remainingTermMonths: months,
+      currentPrincipalBalance: customLoanBalance,
+      annualInterestRatePercent: customLoanRate,
+      remainingTermMonths: customLoanTerm,
       extraMonthlyPrincipalContribution: extraMonthlyAbono,
       monthlyNetSurplusGtq: surplus,
     });
-  }, [activeLoan, extraMonthlyAbono, kpis]);
+  }, [customLoanBalance, customLoanRate, customLoanTerm, extraMonthlyAbono, kpis]);
+
+  // Rule Tester Evaluation
+  const testedRuleResult = useMemo(() => {
+    if (!testConceptInput.trim()) return null;
+    const upper = testConceptInput.toUpperCase();
+    for (const r of rules) {
+      const patterns = r.keyword_pattern.split("|");
+      if (patterns.some((p) => upper.includes(p.trim().toUpperCase()))) {
+        return r;
+      }
+    }
+    return null;
+  }, [testConceptInput, rules]);
 
   // Live Split Expense Preview for Express Mobile Simulator
   const liveSplitPreview = useMemo(() => {
@@ -454,6 +490,31 @@ export default function FinControlDashboardPage() {
     }
   };
 
+  // Reversibility: Unpair or Pair (RN-02 / RN-04)
+  const handleUnpairTransfer = async (txId: string) => {
+    if (!confirm("¿Deseas desvincular esta transferencia interna y restaurarla como gasto/ingreso operativo?")) return;
+    await fetch("/api/v1/reconcile/pair", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "UNPAIR", transactionIdA: txId }),
+    });
+    await fetchDashboardData();
+  };
+
+  // Category Budget Limit Save
+  const handleSaveBudgetLimit = async (catId: string) => {
+    const val = parseFloat(tempBudgetVal);
+    if (isNaN(val) || val < 0) return;
+    await fetch("/api/v1/categories", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: catId, monthlyBudgetLimitGtq: val }),
+    });
+    setEditingBudgetCatId(null);
+    await fetchDashboardData();
+  };
+
+  // Rule Creation & Deletion
   const handleCreateRule = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newRulePattern || !newRuleMerchant || !newRuleCatId) return;
@@ -472,6 +533,33 @@ export default function FinControlDashboardPage() {
     await fetchDashboardData();
   };
 
+  const handleDeleteRule = async (ruleId: string) => {
+    await fetch(`/api/v1/rules?id=${ruleId}`, { method: "DELETE" });
+    await fetchDashboardData();
+  };
+
+  // Statement Creation
+  const handleCreateStatement = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await fetch("/api/v1/statements", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        periodLabel: stPeriod,
+        cutoffDate: stCutDate,
+        paymentDueDate: stDueDate,
+        statementBalanceGtq: parseFloat(stBalGtq) || 0,
+        statementBalanceUsd: parseFloat(stBalUsd) || 0,
+        paidAmountGtq: parseFloat(stPaidGtq) || 0,
+        paidAmountUsd: parseFloat(stPaidUsd) || 0,
+        interestChargedGtq: 0,
+        interestChargedUsd: 0,
+      }),
+    });
+    await fetchDashboardData();
+  };
+
+  // Visa Cuotas Actions
   const handleCreateInstallment = async (e: React.FormEvent) => {
     e.preventDefault();
     const principal = parseFloat(newCuotaAmount);
@@ -502,6 +590,17 @@ export default function FinControlDashboardPage() {
     await fetchDashboardData();
   };
 
+  const handleSettleEarlyCuota = async (planId: string) => {
+    if (!confirm("¿Deseas liquidar anticipadamente el saldo completo de esta compra en cuotas?")) return;
+    await fetch("/api/v1/installments", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: planId, action: "SETTLE_EARLY" }),
+    });
+    await fetchDashboardData();
+  };
+
+  // Milestone Actions
   const handleCreateMilestone = async (e: React.FormEvent) => {
     e.preventDefault();
     const amount = parseFloat(newMsAmount);
@@ -521,6 +620,30 @@ export default function FinControlDashboardPage() {
     setNewMsName("");
     setNewMsAmount("");
     setNewMsNotes("");
+    await fetchDashboardData();
+  };
+
+  const handleDeleteMilestone = async (mId: string) => {
+    await fetch(`/api/v1/milestones?id=${mId}`, { method: "DELETE" });
+    await fetchDashboardData();
+  };
+
+  // Snapshot Creation
+  const handleSaveSnapshot = async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    await fetch("/api/v1/snapshots", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        snapshotMonth: today,
+        liquidAssetsGtq: kpis.liquidAssetsGtq,
+        investmentAssetsGtq: kpis.investmentAssetsGtq,
+        receivablesAssetsGtq: kpis.pendingReceivablesGtq,
+        currentLiabilitiesGtq: kpis.creditCardLiabilitiesGtq,
+        longTermLiabilitiesGtq: kpis.mortgageLiabilitiesGtq,
+      }),
+    });
+    alert("¡Instantánea patrimonial guardada con éxito!");
     await fetchDashboardData();
   };
 
@@ -552,6 +675,11 @@ export default function FinControlDashboardPage() {
     await fetch(`/api/v1/transactions/${id}`, { method: "DELETE" });
     await fetchDashboardData();
   };
+
+  const filteredDocuments = useMemo(() => {
+    if (docFilter === "ALL") return documents;
+    return documents.filter((d) => d.status === docFilter);
+  }, [documents, docFilter]);
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-950 text-slate-100">
@@ -820,10 +948,19 @@ export default function FinControlDashboardPage() {
                                   : "📄 PDF Estado Cuenta"}
                               </span>
                               {tx.type === "INTERNAL_TRANSFER" ? (
-                                <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full w-fit bg-sky-500/20 text-sky-300 border border-sky-500/30">
-                                  <ArrowLeftRight className="h-3 w-3" />
-                                  Transferencia Interna (RN-02 Neutralizada)
-                                </span>
+                                <div className="flex items-center gap-1">
+                                  <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-sky-500/20 text-sky-300 border border-sky-500/30">
+                                    <ArrowLeftRight className="h-3 w-3" />
+                                    Transferencia Interna (RN-02)
+                                  </span>
+                                  <button
+                                    onClick={() => handleUnpairTransfer(tx.id)}
+                                    title="Desvincular transferencia (RN-04)"
+                                    className="text-[10px] text-slate-400 hover:text-rose-400 underline"
+                                  >
+                                    Desvincular
+                                  </button>
+                                </div>
                               ) : tx.reconciliation_status === "RECONCILED_MERGED" ? (
                                 <span className="inline-flex items-center gap-1 text-[10px] font-medium text-emerald-400">
                                   <CheckCircle2 className="h-3 w-3" />
@@ -965,13 +1102,31 @@ export default function FinControlDashboardPage() {
                 </div>
               </div>
 
-              {/* Processed Files List */}
+              {/* Processed Files List with Status Filter */}
               <div className="rounded-2xl bg-slate-900/90 border border-slate-800 p-5 space-y-4">
-                <h3 className="text-sm font-semibold text-white">
-                  Cola de Documentos Auditados y Estado de Conciliación
-                </h3>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="text-sm font-semibold text-white">
+                    Cola de Documentos Auditados y Estado de Conciliación
+                  </h3>
+                  <div className="flex gap-1 text-[11px]">
+                    {["ALL", "RECONCILED", "NEEDS_REVIEW"].map((f) => (
+                      <button
+                        key={f}
+                        onClick={() => setDocFilter(f)}
+                        className={`px-2.5 py-1 rounded-lg border ${
+                          docFilter === f
+                            ? "bg-indigo-600 border-indigo-500 text-white"
+                            : "bg-slate-950 border-slate-800 text-slate-400"
+                        }`}
+                      >
+                        {f === "ALL" ? "Todos" : f === "RECONCILED" ? "Conciliados" : "Requiere Revisión"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
                 <div className="space-y-3">
-                  {documents.map((doc) => (
+                  {filteredDocuments.map((doc) => (
                     <div
                       key={doc.id}
                       onClick={() => setSelectedDocId(doc.id)}
@@ -1129,12 +1284,45 @@ export default function FinControlDashboardPage() {
               })}
             </div>
 
-            {/* Category Semaphores & Keyword Rules Admin */}
+            {/* Interactive Rule Tester Tool */}
+            <div className="p-4 rounded-2xl bg-indigo-950/30 border border-indigo-500/30 flex flex-wrap items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <Sparkles className="h-5 w-5 text-indigo-400" />
+                <div>
+                  <h4 className="text-xs font-bold text-white">
+                    Simulador Interactivo de Reglas en Tiempo Real
+                  </h4>
+                  <p className="text-[11px] text-slate-400">
+                    Escribe cualquier texto de factura o estado de cuenta bancario para probar la predicción de categoría.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 flex-1 max-w-md">
+                <input
+                  type="text"
+                  placeholder="Ej. POS COMPRA WALMART Z10..."
+                  value={testConceptInput}
+                  onChange={(e) => setTestConceptInput(e.target.value)}
+                  className="flex-1 px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-white"
+                />
+                {testedRuleResult ? (
+                  <span className="px-2.5 py-1 rounded-lg bg-emerald-500/20 text-emerald-300 text-xs font-bold border border-emerald-500/30 whitespace-nowrap">
+                    ✓ {testedRuleResult.category_name}
+                  </span>
+                ) : testConceptInput.trim() ? (
+                  <span className="px-2.5 py-1 rounded-lg bg-slate-800 text-slate-400 text-xs whitespace-nowrap">
+                    Sin regla directa
+                  </span>
+                ) : null}
+              </div>
+            </div>
+
+            {/* Category Semaphores with Inline Budget Editing */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               {/* Category Semaphore Bars */}
               <div className="rounded-2xl bg-slate-900/90 border border-slate-800 p-5 space-y-4">
                 <h3 className="text-sm font-semibold text-white">
-                  Semáforo por Categoría (Solo contabiliza Gasto Propio RN-01)
+                  Semáforo por Categoría (Edita techos presupuestarios con un clic)
                 </h3>
                 <div className="space-y-3.5">
                   {categories.map((cat) => (
@@ -1150,10 +1338,47 @@ export default function FinControlDashboardPage() {
                             </span>
                           )}
                         </div>
-                        <span className="text-slate-300">
-                          {fmtQ(cat.executed_personal_gtq)} /{" "}
-                          {fmtQ(cat.monthly_budget_limit_gtq)} ({cat.percentage}%)
-                        </span>
+                        <div className="flex items-center gap-1.5">
+                          {editingBudgetCatId === cat.id ? (
+                            <div className="flex items-center gap-1">
+                              <input
+                                type="number"
+                                value={tempBudgetVal}
+                                onChange={(e) => setTempBudgetVal(e.target.value)}
+                                className="w-20 px-1.5 py-0.5 rounded bg-slate-950 border border-slate-700 text-white text-right text-xs"
+                              />
+                              <button
+                                onClick={() => handleSaveBudgetLimit(cat.id)}
+                                className="p-1 rounded bg-emerald-600 text-white"
+                              >
+                                <Check className="h-3 w-3" />
+                              </button>
+                              <button
+                                onClick={() => setEditingBudgetCatId(null)}
+                                className="p-1 rounded bg-slate-800 text-slate-400"
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-1">
+                              <span className="text-slate-300">
+                                {fmtQ(cat.executed_personal_gtq)} /{" "}
+                                {fmtQ(cat.monthly_budget_limit_gtq)} ({cat.percentage}%)
+                              </span>
+                              <button
+                                onClick={() => {
+                                  setEditingBudgetCatId(cat.id);
+                                  setTempBudgetVal(String(cat.monthly_budget_limit_gtq));
+                                }}
+                                title="Editar límite presupuestario"
+                                className="p-0.5 text-slate-500 hover:text-slate-300"
+                              >
+                                <Edit2 className="h-3 w-3" />
+                              </button>
+                            </div>
+                          )}
+                        </div>
                       </div>
                       <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
                         <div
@@ -1233,9 +1458,18 @@ export default function FinControlDashboardPage() {
                           → {r.merchant_display_name} ({r.category_name})
                         </p>
                       </div>
-                      <span className="text-[11px] px-2 py-0.5 rounded bg-slate-800 text-slate-300">
-                        {r.usage_count} usos
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[11px] px-2 py-0.5 rounded bg-slate-800 text-slate-300">
+                          {r.usage_count} usos
+                        </span>
+                        <button
+                          onClick={() => handleDeleteRule(r.id)}
+                          title="Eliminar regla"
+                          className="p-1 text-slate-500 hover:text-rose-400"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -1251,14 +1485,66 @@ export default function FinControlDashboardPage() {
           <div className="space-y-6">
             {/* Bimonetary Statement Audit Table */}
             <div className="rounded-2xl bg-slate-900/90 border border-slate-800 p-5 space-y-4">
-              <div>
-                <h2 className="text-sm font-semibold text-white">
-                  Auditoría de Cortes Bimonetarios (GTQ y USD Independientes) & Verificación Totalero
-                </h2>
-                <p className="text-xs text-slate-400">
-                  Confirma matemáticamente el pago de contado al corte y audita que exista Q 0.00 / $ 0.00 de cargos por intereses moratorios o financiamiento.
-                </p>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h2 className="text-sm font-semibold text-white">
+                    Auditoría de Cortes Bimonetarios (GTQ y USD Independientes) & Verificación Totalero
+                  </h2>
+                  <p className="text-xs text-slate-400">
+                    Confirma matemáticamente el pago de contado al corte y audita que exista Q 0.00 / $ 0.00 de cargos por intereses moratorios o financiamiento.
+                  </p>
+                </div>
               </div>
+
+              {/* Form to register a new Statement Cut */}
+              <form onSubmit={handleCreateStatement} className="grid grid-cols-2 sm:grid-cols-7 gap-2 p-3 rounded-xl bg-slate-950 border border-slate-800 text-xs">
+                <input
+                  type="text"
+                  placeholder="Periodo (ej. Dic 2026)"
+                  value={stPeriod}
+                  onChange={(e) => setStPeriod(e.target.value)}
+                  className="px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-white"
+                />
+                <input
+                  type="date"
+                  value={stCutDate}
+                  onChange={(e) => setStCutDate(e.target.value)}
+                  className="px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-white"
+                />
+                <input
+                  type="date"
+                  value={stDueDate}
+                  onChange={(e) => setStDueDate(e.target.value)}
+                  className="px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-white"
+                />
+                <input
+                  type="number"
+                  placeholder="Saldo GTQ"
+                  value={stBalGtq}
+                  onChange={(e) => setStBalGtq(e.target.value)}
+                  className="px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-white"
+                />
+                <input
+                  type="number"
+                  placeholder="Pagado GTQ"
+                  value={stPaidGtq}
+                  onChange={(e) => setStPaidGtq(e.target.value)}
+                  className="px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-white"
+                />
+                <input
+                  type="number"
+                  placeholder="Saldo USD"
+                  value={stBalUsd}
+                  onChange={(e) => setStBalUsd(e.target.value)}
+                  className="px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-white"
+                />
+                <button
+                  type="submit"
+                  className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 font-semibold text-white"
+                >
+                  + Corte TC
+                </button>
+              </form>
 
               <div className="overflow-x-auto">
                 <table className="w-full text-left border-collapse text-xs">
@@ -1421,12 +1707,20 @@ export default function FinControlDashboardPage() {
                           </span>
                         </div>
                       </div>
-                      <button
-                        onClick={() => handleAdvanceCuota(plan.id)}
-                        className="w-full mt-2 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-[11px] text-slate-300"
-                      >
-                        ✓ Registrar Débito de Cuota Mensual
-                      </button>
+                      <div className="flex gap-2 pt-1">
+                        <button
+                          onClick={() => handleAdvanceCuota(plan.id)}
+                          className="flex-1 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-[11px] text-slate-300"
+                        >
+                          ✓ Débito Mensual
+                        </button>
+                        <button
+                          onClick={() => handleSettleEarlyCuota(plan.id)}
+                          className="px-2 py-1 rounded-lg bg-emerald-950 hover:bg-emerald-900 border border-emerald-700/50 text-[11px] text-emerald-300"
+                        >
+                          Liquidar Saldo
+                        </button>
+                      </div>
                     </div>
                   );
                 })}
@@ -1446,16 +1740,46 @@ export default function FinControlDashboardPage() {
                 <h2 className="text-sm font-semibold text-white">
                   Desglose Contable de Cuota Hipotecaria
                 </h2>
-                <p className="text-xs text-slate-400">
-                  {activeLoan?.name || "Préstamo Hipotecario Vivienda"} • Saldo Actual:{" "}
-                  <strong className="text-white">
-                    {fmtQ(activeLoan?.current_principal_balance || 685000)}
-                  </strong>{" "}
-                  ({activeLoan?.annual_interest_rate || 7.5}% anual)
-                </p>
 
-                <div className="space-y-3 pt-2">
-                  <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30">
+                {/* Loan Base Parameter Adjustment */}
+                <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-2 text-xs">
+                  <span className="text-[11px] font-semibold text-indigo-400 uppercase tracking-wider block">
+                    Parámetros Base de la Deuda
+                  </span>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <label className="text-[10px] text-slate-400 block">Saldo Actual</label>
+                      <input
+                        type="number"
+                        value={customLoanBalance}
+                        onChange={(e) => setCustomLoanBalance(Number(e.target.value))}
+                        className="w-full px-1.5 py-1 rounded bg-slate-900 border border-slate-700 text-white text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-slate-400 block">Tasa Anual %</label>
+                      <input
+                        type="number"
+                        step="0.1"
+                        value={customLoanRate}
+                        onChange={(e) => setCustomLoanRate(Number(e.target.value))}
+                        className="w-full px-1.5 py-1 rounded bg-slate-900 border border-slate-700 text-white text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-slate-400 block">Meses Restantes</label>
+                      <input
+                        type="number"
+                        value={customLoanTerm}
+                        onChange={(e) => setCustomLoanTerm(Number(e.target.value))}
+                        className="w-full px-1.5 py-1 rounded bg-slate-900 border border-slate-700 text-white text-xs"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-3 pt-1">
+                  <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30">
                     <div className="flex justify-between text-xs font-semibold text-emerald-300">
                       <span>Abono Directo a Capital</span>
                       <span>Q 1,850.00</span>
@@ -1465,7 +1789,7 @@ export default function FinControlDashboardPage() {
                     </p>
                   </div>
 
-                  <div className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/30">
+                  <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30">
                     <div className="flex justify-between text-xs font-semibold text-rose-300">
                       <span>Costo de Intereses Bancarios</span>
                       <span>Q 4,281.25</span>
@@ -1475,7 +1799,7 @@ export default function FinControlDashboardPage() {
                     </p>
                   </div>
 
-                  <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30">
+                  <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30">
                     <div className="flex justify-between text-xs font-semibold text-amber-300">
                       <span>Seguros y Comisiones</span>
                       <span>Q 368.75</span>
@@ -1625,9 +1949,19 @@ export default function FinControlDashboardPage() {
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               {/* Balance Patrimonial Consolidado */}
               <div className="rounded-2xl bg-slate-900/90 border border-slate-800 p-5 space-y-4">
-                <h2 className="text-sm font-semibold text-white">
-                  Balance Patrimonial Consolidado (Net Worth Tracker)
-                </h2>
+                <div className="flex items-center justify-between">
+                  <h2 className="text-sm font-semibold text-white">
+                    Balance Patrimonial Consolidado (Net Worth Tracker)
+                  </h2>
+                  <button
+                    onClick={handleSaveSnapshot}
+                    className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-xs font-bold text-white flex items-center gap-1.5"
+                  >
+                    <Save className="h-3.5 w-3.5" />
+                    Guardar Snapshot
+                  </button>
+                </div>
+
                 <div className="space-y-2.5 text-xs">
                   <div className="flex justify-between p-3 rounded-xl bg-slate-950 border border-slate-800">
                     <span className="text-slate-300">
@@ -1682,10 +2016,10 @@ export default function FinControlDashboardPage() {
                 {/* Historical Evolution */}
                 <div className="pt-2">
                   <p className="text-xs font-semibold text-slate-300 mb-2">
-                    Evolución Patrimonial Reciente (Últimos 6 meses)
+                    Evolución Patrimonial Reciente (Últimos snapshots)
                   </p>
                   <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 text-center text-[11px]">
-                    {snapshots.map((s) => (
+                    {snapshots.slice(-6).map((s) => (
                       <div
                         key={s.snapshot_month}
                         className="p-2 rounded-lg bg-slate-950 border border-slate-800"
@@ -1769,16 +2103,25 @@ export default function FinControlDashboardPage() {
                         </p>
                         <p className="text-[11px] text-slate-400">{m.notes}</p>
                       </div>
-                      <span
-                        className={`font-bold ${
-                          m.kind === "INCOME_BONUS"
-                            ? "text-emerald-400"
-                            : "text-rose-400"
-                        }`}
-                      >
-                        {m.kind === "INCOME_BONUS" ? "+" : "-"}
-                        {fmtQ(m.estimated_amount_gtq)}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`font-bold ${
+                            m.kind === "INCOME_BONUS"
+                              ? "text-emerald-400"
+                              : "text-rose-400"
+                          }`}
+                        >
+                          {m.kind === "INCOME_BONUS" ? "+" : "-"}
+                          {fmtQ(m.estimated_amount_gtq)}
+                        </span>
+                        <button
+                          onClick={() => handleDeleteMilestone(m.id)}
+                          title="Eliminar hito"
+                          className="p-1 text-slate-500 hover:text-rose-400"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
