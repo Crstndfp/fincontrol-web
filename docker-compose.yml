@@ -1,0 +1,25 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: fincontrol_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-fincontrol}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fincontrol_secret_2026}
+      POSTGRES_DB: ${POSTGRES_DB:-fincontrol_db}
+      TZ: America/Guatemala
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - fincontrol_pgdata:/var/lib/postgresql/data
+      - ./database/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-fincontrol} -d ${POSTGRES_DB:-fincontrol_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  fincontrol_pgdata:
