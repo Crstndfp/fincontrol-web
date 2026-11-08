@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo, useRef } from "react";
 import {
   Wallet,
   UploadCloud,
@@ -19,6 +19,11 @@ import {
   PlusCircle,
   FileText,
   ShieldCheck,
+  Edit2,
+  Trash2,
+  Check,
+  X,
+  Plus,
 } from "lucide-react";
 import {
   simulateMortgagePrepayment,
@@ -55,7 +60,9 @@ interface CategoryItem {
 
 interface TransactionItem {
   id: string;
+  account_id: string;
   account_name: string;
+  category_id: string | null;
   category_name: string | null;
   merchant_name: string;
   description: string;
@@ -72,9 +79,7 @@ interface TransactionItem {
   debtor_name: string | null;
   reconciliation_status: string;
   bank_reference_code: string | null;
-  principal_amount_gtq?: number;
-  interest_amount_gtq?: number;
-  insurance_fees_gtq?: number;
+  is_manual_override?: boolean;
 }
 
 interface UploadedDoc {
@@ -212,9 +217,29 @@ export default function FinControlDashboardPage() {
   const [newRuleMerchant, setNewRuleMerchant] = useState("");
   const [newRuleCatId, setNewRuleCatId] = useState("");
 
-  // Selected Document for Lateral Preview
+  // New Installment Plan Form State (Visa Cuotas)
+  const [newCuotaMerchant, setNewCuotaMerchant] = useState("");
+  const [newCuotaDesc, setNewCuotaDesc] = useState("");
+  const [newCuotaAmount, setNewCuotaAmount] = useState("");
+  const [newCuotaMonths, setNewCuotaMonths] = useState("12");
+
+  // New Milestone Form State (Module 4.7)
+  const [newMsName, setNewMsName] = useState("");
+  const [newMsMonth, setNewMsMonth] = useState("7");
+  const [newMsKind, setNewMsKind] = useState<"INCOME_BONUS" | "ANNUAL_EXPENSE">("INCOME_BONUS");
+  const [newMsAmount, setNewMsAmount] = useState("");
+  const [newMsNotes, setNewMsNotes] = useState("");
+
+  // Transaction Edit Modal / Override State (RN-04)
+  const [editingTx, setEditingTx] = useState<TransactionItem | null>(null);
+  const [editCategory, setEditCategory] = useState("");
+  const [editSplitPct, setEditSplitPct] = useState(100);
+  const [editMerchant, setEditMerchant] = useState("");
+
+  // Dropzone State
   const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
   const [uploadingDoc, setUploadingDoc] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const fetchDashboardData = async () => {
     setLoading(true);
@@ -312,7 +337,7 @@ export default function FinControlDashboardPage() {
     };
   }, [accounts, transactions, categories]);
 
-  // Mortgage Prepayment Simulation (Module 4.5)
+  // Mortgage Prepayment Simulation (Module 4.5 & Scenario 3)
   const activeLoan = loans[0];
   const loanSimulation = useMemo(() => {
     const balance = activeLoan ? activeLoan.current_principal_balance : 685000;
@@ -350,7 +375,6 @@ export default function FinControlDashboardPage() {
     }
   }, [mobAmount, mobCurrency, mobIsSplit, mobSplitMode, mobSplitPct, mobExactOwn]);
 
-  // Predictive merchant category auto-selection
   const handleMerchantTyping = (value: string) => {
     setMobMerchant(value);
     const upper = value.toUpperCase();
@@ -394,6 +418,23 @@ export default function FinControlDashboardPage() {
     }
   };
 
+  const handleRealFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingDoc(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      await fetch("/api/v1/reconcile", {
+        method: "POST",
+        body: formData,
+      });
+      await fetchDashboardData();
+    } finally {
+      setUploadingDoc(false);
+    }
+  };
+
   const handleSimulatedDocumentDrop = async (sampleFileName: string) => {
     setUploadingDoc(true);
     try {
@@ -428,6 +469,87 @@ export default function FinControlDashboardPage() {
     });
     setNewRulePattern("");
     setNewRuleMerchant("");
+    await fetchDashboardData();
+  };
+
+  const handleCreateInstallment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const principal = parseFloat(newCuotaAmount);
+    const months = parseInt(newCuotaMonths);
+    if (!newCuotaMerchant || !newCuotaDesc || isNaN(principal) || isNaN(months)) return;
+    await fetch("/api/v1/installments", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        merchantName: newCuotaMerchant,
+        description: newCuotaDesc,
+        totalPrincipal: principal,
+        totalInstallments: months,
+      }),
+    });
+    setNewCuotaMerchant("");
+    setNewCuotaDesc("");
+    setNewCuotaAmount("");
+    await fetchDashboardData();
+  };
+
+  const handleAdvanceCuota = async (planId: string) => {
+    await fetch("/api/v1/installments", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: planId, action: "ADVANCE_PAYMENT" }),
+    });
+    await fetchDashboardData();
+  };
+
+  const handleCreateMilestone = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const amount = parseFloat(newMsAmount);
+    const month = parseInt(newMsMonth);
+    if (!newMsName || isNaN(amount) || isNaN(month)) return;
+    await fetch("/api/v1/milestones", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: newMsName,
+        monthNumber: month,
+        kind: newMsKind,
+        estimatedAmountGtq: amount,
+        notes: newMsNotes,
+      }),
+    });
+    setNewMsName("");
+    setNewMsAmount("");
+    setNewMsNotes("");
+    await fetchDashboardData();
+  };
+
+  // RN-04 Manual Override
+  const openEditModal = (tx: TransactionItem) => {
+    setEditingTx(tx);
+    setEditCategory(tx.category_id || (categories[0]?.id || ""));
+    setEditSplitPct(tx.split_percentage || 100);
+    setEditMerchant(tx.merchant_name);
+  };
+
+  const handleSaveTxOverride = async () => {
+    if (!editingTx) return;
+    await fetch(`/api/v1/transactions/${editingTx.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        categoryId: editCategory,
+        merchantName: editMerchant,
+        splitPercentage: editSplitPct,
+      }),
+    });
+    setEditingTx(null);
+    await fetchDashboardData();
+  };
+
+  const handleDeleteTx = async (id: string) => {
+    if (!confirm("¿Deseas eliminar este registro contable?")) return;
+    await fetch(`/api/v1/transactions/${id}`, { method: "DELETE" });
     await fetchDashboardData();
   };
 
@@ -649,7 +771,7 @@ export default function FinControlDashboardPage() {
                       Libro Mayor Consolidado (App Android + Estados de Cuenta PDF)
                     </h2>
                     <p className="text-xs text-slate-400">
-                      Desglose de Gasto Personal Real (RN-01), Transferencias Neutralizadas (RN-02) y Conciliación
+                      Gasto Propio (RN-01), Transferencias Neutralizadas (RN-02) y Auditoría Reversible (RN-04)
                     </p>
                   </div>
                   <button
@@ -670,6 +792,7 @@ export default function FinControlDashboardPage() {
                         <th className="py-2.5 px-2 text-right">Pagado Total</th>
                         <th className="py-2.5 px-2 text-right">Gasto Propio (RN-01)</th>
                         <th className="py-2.5 px-2 text-right">Por Cobrar</th>
+                        <th className="py-2.5 px-2 text-center">Acciones (RN-04)</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-800/60">
@@ -683,6 +806,11 @@ export default function FinControlDashboardPage() {
                               {tx.category_name || "Transferencia / Nómina"} •{" "}
                               {tx.account_name}
                             </p>
+                            {tx.is_manual_override && (
+                              <span className="inline-block mt-0.5 text-[10px] text-amber-300">
+                                ✎ Ajuste manual de usuario
+                              </span>
+                            )}
                           </td>
                           <td className="py-3 px-2">
                             <div className="flex flex-col gap-1">
@@ -747,6 +875,24 @@ export default function FinControlDashboardPage() {
                               <span className="text-slate-600">—</span>
                             )}
                           </td>
+                          <td className="py-3 px-2 text-center">
+                            <div className="flex items-center justify-center gap-1.5">
+                              <button
+                                onClick={() => openEditModal(tx)}
+                                title="Editar / Reclasificar (RN-04)"
+                                className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300"
+                              >
+                                <Edit2 className="h-3.5 w-3.5" />
+                              </button>
+                              <button
+                                onClick={() => handleDeleteTx(tx.id)}
+                                title="Eliminar registro"
+                                className="p-1 rounded bg-slate-800 hover:bg-rose-950 text-slate-400 hover:text-rose-400"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -763,7 +909,7 @@ export default function FinControlDashboardPage() {
         {activeTab === "INGEST_RECONCILE" && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="lg:col-span-2 space-y-6">
-              {/* Smart Multi-File Dropzone */}
+              {/* Smart Multi-File Dropzone with Real File Input */}
               <div className="rounded-2xl bg-slate-900/90 border-2 border-dashed border-indigo-500/40 p-6 text-center space-y-4">
                 <div className="h-12 w-12 rounded-2xl bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center mx-auto">
                   <UploadCloud className="h-6 w-6 text-indigo-400" />
@@ -773,11 +919,27 @@ export default function FinControlDashboardPage() {
                     Dropzone Inteligente: Carga Masiva de Estados de Cuenta PDF y Facturas
                   </h2>
                   <p className="text-xs text-slate-400 max-w-xl mx-auto mt-1">
-                    Soporta estados de cuenta bancarios en PDF (Monetarias, Ahorro, TC Bimonetarias, Préstamos) e imágenes de tickets (PNG, JPG, HEIC). Ejecuta emparejamiento antiduplicidad con registros de la App Android y neutraliza transferencias propias (RN-02).
+                    Soporta PDFs bancarios y comprobantes en imagen. Extrae transacciones, empareja con gastos registrados en Android y neutraliza pagos de tarjetas entre cuentas propias (RN-02).
                   </p>
                 </div>
 
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={handleRealFileUpload}
+                  accept=".pdf,image/png,image/jpeg,image/heic"
+                  className="hidden"
+                />
+
                 <div className="flex flex-wrap justify-center gap-3 pt-2">
+                  <button
+                    disabled={uploadingDoc}
+                    onClick={() => fileInputRef.current?.click()}
+                    className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white transition flex items-center gap-2"
+                  >
+                    <UploadCloud className="h-4 w-4" />
+                    {uploadingDoc ? "Procesando archivo..." : "Seleccionar Archivo Local (PDF / Imagen)"}
+                  </button>
                   <button
                     disabled={uploadingDoc}
                     onClick={() =>
@@ -785,11 +947,9 @@ export default function FinControlDashboardPage() {
                         "Estado_Cuenta_TC_BAC_Nov2026_Corte.pdf"
                       )
                     }
-                    className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-semibold text-white transition"
+                    className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-semibold text-slate-200 transition"
                   >
-                    {uploadingDoc
-                      ? "Procesando y Conciliando..."
-                      : "Simular Carga PDF Estado de Cuenta TC (Concilia Gastos Móviles)"}
+                    Simular Carga PDF TC BAC (Concilia Móvil)
                   </button>
                   <button
                     disabled={uploadingDoc}
@@ -800,7 +960,7 @@ export default function FinControlDashboardPage() {
                     }
                     className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-semibold text-slate-200 transition"
                   >
-                    Simular Carga Foto de Factura / Ticket (JPG)
+                    Simular Carga Ticket Factura (JPG)
                   </button>
                 </div>
               </div>
@@ -1033,7 +1193,7 @@ export default function FinControlDashboardPage() {
                   />
                   <input
                     type="text"
-                    placeholder="Nombre Comercio (ej. Uber Rides)"
+                    placeholder="Nombre Comercio (ej. Uber)"
                     value={newRuleMerchant}
                     onChange={(e) => setNewRuleMerchant(e.target.value)}
                     className="px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-xs text-white"
@@ -1158,11 +1318,62 @@ export default function FinControlDashboardPage() {
               </div>
             </div>
 
-            {/* Visa Cuotas Tracker */}
+            {/* Visa Cuotas Tracker & Registration Form */}
             <div className="rounded-2xl bg-slate-900/90 border border-slate-800 p-5 space-y-4">
-              <h3 className="text-sm font-semibold text-white">
-                Bitácora de Compras Financiadas a Tasa 0% (Visa Cuotas)
-              </h3>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h3 className="text-sm font-semibold text-white">
+                    Bitácora de Compras Financiadas a Tasa 0% (Visa Cuotas)
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Control de cuotas mensuales pactadas y saldo remanente a liquidar.
+                  </p>
+                </div>
+              </div>
+
+              {/* Form to add a new Visa Cuotas plan */}
+              <form onSubmit={handleCreateInstallment} className="grid grid-cols-1 sm:grid-cols-5 gap-2 p-3 rounded-xl bg-slate-950 border border-slate-800">
+                <input
+                  type="text"
+                  placeholder="Comercio (ej. iShop)"
+                  value={newCuotaMerchant}
+                  onChange={(e) => setNewCuotaMerchant(e.target.value)}
+                  className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-white"
+                />
+                <input
+                  type="text"
+                  placeholder="Descripción (ej. iPhone 16)"
+                  value={newCuotaDesc}
+                  onChange={(e) => setNewCuotaDesc(e.target.value)}
+                  className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-white"
+                />
+                <input
+                  type="number"
+                  placeholder="Monto Total GTQ"
+                  value={newCuotaAmount}
+                  onChange={(e) => setNewCuotaAmount(e.target.value)}
+                  className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-white"
+                />
+                <select
+                  value={newCuotaMonths}
+                  onChange={(e) => setNewCuotaMonths(e.target.value)}
+                  className="px-2 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-white"
+                >
+                  <option value="3">3 Cuotas</option>
+                  <option value="6">6 Cuotas</option>
+                  <option value="10">10 Cuotas</option>
+                  <option value="12">12 Cuotas</option>
+                  <option value="18">18 Cuotas</option>
+                  <option value="24">24 Cuotas</option>
+                </select>
+                <button
+                  type="submit"
+                  className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-xs font-semibold text-white"
+                >
+                  + Agregar Cuota 0%
+                </button>
+              </form>
+
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 {installments.map((plan) => {
                   const pct = Math.round(
@@ -1210,6 +1421,12 @@ export default function FinControlDashboardPage() {
                           </span>
                         </div>
                       </div>
+                      <button
+                        onClick={() => handleAdvanceCuota(plan.id)}
+                        className="w-full mt-2 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-[11px] text-slate-300"
+                      >
+                        ✓ Registrar Débito de Cuota Mensual
+                      </button>
                     </div>
                   );
                 })}
@@ -1222,140 +1439,179 @@ export default function FinControlDashboardPage() {
             TAB 5: MORTGAGE & PARAMETRIC EARLY AMORTIZATION SIMULATOR (4.5)
         =================================================================== */}
         {activeTab === "MORTGAGE_SIM" && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Left: Accounting Breakdown of Current Mortgage Installment */}
-            <div className="rounded-2xl bg-slate-900/90 border border-slate-800 p-5 space-y-4">
-              <h2 className="text-sm font-semibold text-white">
-                Desglose Contable de Cuota Hipotecaria
-              </h2>
-              <p className="text-xs text-slate-400">
-                {activeLoan?.name || "Préstamo Hipotecario Vivienda"} • Saldo Actual:{" "}
-                <strong className="text-white">
-                  {fmtQ(activeLoan?.current_principal_balance || 685000)}
-                </strong>{" "}
-                ({activeLoan?.annual_interest_rate || 7.5}% anual)
-              </p>
+          <div className="space-y-6">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              {/* Left: Accounting Breakdown of Current Mortgage Installment */}
+              <div className="rounded-2xl bg-slate-900/90 border border-slate-800 p-5 space-y-4">
+                <h2 className="text-sm font-semibold text-white">
+                  Desglose Contable de Cuota Hipotecaria
+                </h2>
+                <p className="text-xs text-slate-400">
+                  {activeLoan?.name || "Préstamo Hipotecario Vivienda"} • Saldo Actual:{" "}
+                  <strong className="text-white">
+                    {fmtQ(activeLoan?.current_principal_balance || 685000)}
+                  </strong>{" "}
+                  ({activeLoan?.annual_interest_rate || 7.5}% anual)
+                </p>
 
-              <div className="space-y-3 pt-2">
-                <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30">
-                  <div className="flex justify-between text-xs font-semibold text-emerald-300">
-                    <span>Abono Directo a Capital</span>
-                    <span>Q 1,850.00</span>
+                <div className="space-y-3 pt-2">
+                  <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30">
+                    <div className="flex justify-between text-xs font-semibold text-emerald-300">
+                      <span>Abono Directo a Capital</span>
+                      <span>Q 1,850.00</span>
+                    </div>
+                    <p className="text-[11px] text-slate-400 mt-1">
+                      Contabilizado como incremento directo en el Patrimonio Neto.
+                    </p>
                   </div>
-                  <p className="text-[11px] text-slate-400 mt-1">
-                    Contabilizado como incremento directo en el Patrimonio Neto.
-                  </p>
+
+                  <div className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/30">
+                    <div className="flex justify-between text-xs font-semibold text-rose-300">
+                      <span>Costo de Intereses Bancarios</span>
+                      <span>Q 4,281.25</span>
+                    </div>
+                    <p className="text-[11px] text-slate-400 mt-1">
+                      Gasto financiero no recuperable por costo del dinero.
+                    </p>
+                  </div>
+
+                  <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30">
+                    <div className="flex justify-between text-xs font-semibold text-amber-300">
+                      <span>Seguros y Comisiones</span>
+                      <span>Q 368.75</span>
+                    </div>
+                    <p className="text-[11px] text-slate-400 mt-1">
+                      Gasto fijo operativo mensual (Seguro de vida e incendio).
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Right: Interactive Parametric Prepayment Simulator (Scenario 3) */}
+              <div className="lg:col-span-2 rounded-2xl bg-slate-900/90 border border-slate-800 p-5 space-y-5">
+                <div>
+                  <span className="text-[11px] font-semibold uppercase tracking-wider text-indigo-400">
+                    Escenario 3 • Simulador Paramétrico en Tiempo Real
+                  </span>
+                  <h2 className="text-base font-bold text-white mt-0.5">
+                    ¿Qué pasa si abono capital extraordinario cada mes?
+                  </h2>
                 </div>
 
-                <div className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/30">
-                  <div className="flex justify-between text-xs font-semibold text-rose-300">
-                    <span>Costo de Intereses Bancarios</span>
-                    <span>Q 4,281.25</span>
+                {/* Quick Preset Buttons + Slider */}
+                <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-xs text-slate-300">
+                      Abono Adicional Mensual a Capital:
+                    </span>
+                    <span className="text-xl font-bold text-indigo-400">
+                      {fmtQ(extraMonthlyAbono)} / mes
+                    </span>
                   </div>
-                  <p className="text-[11px] text-slate-400 mt-1">
-                    Gasto financiero no recuperable por costo del dinero.
-                  </p>
+
+                  <input
+                    type="range"
+                    min={0}
+                    max={10000}
+                    step={250}
+                    value={extraMonthlyAbono}
+                    onChange={(e) => setExtraMonthlyAbono(Number(e.target.value))}
+                    className="w-full accent-indigo-500 cursor-pointer"
+                  />
+
+                  <div className="flex flex-wrap gap-2">
+                    {[1000, 2500, 5000, 7500].map((preset) => (
+                      <button
+                        key={preset}
+                        onClick={() => setExtraMonthlyAbono(preset)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition ${
+                          extraMonthlyAbono === preset
+                            ? "bg-indigo-600 border-indigo-500 text-white"
+                            : "bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-800"
+                        }`}
+                      >
+                        + {fmtQ(preset)}
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
-                <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30">
-                  <div className="flex justify-between text-xs font-semibold text-amber-300">
-                    <span>Seguros y Comisiones</span>
-                    <span>Q 368.75</span>
+                {/* Comparative Simulation Outputs */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30">
+                    <span className="text-xs text-emerald-300 block">
+                      Intereses Futuros Ahorrados
+                    </span>
+                    <p className="text-xl font-bold text-white mt-1">
+                      {fmtQ(loanSimulation.interestSavedGtq)}
+                    </p>
+                    <p className="text-[11px] text-slate-400 mt-1">
+                      Dinero que no pagarás al banco
+                    </p>
                   </div>
-                  <p className="text-[11px] text-slate-400 mt-1">
-                    Gasto fijo operativo mensual (Seguro de vida e incendio).
-                  </p>
+
+                  <div className="p-4 rounded-xl bg-indigo-500/10 border border-indigo-500/30">
+                    <span className="text-xs text-indigo-300 block">
+                      Reducción de Plazo Total
+                    </span>
+                    <p className="text-xl font-bold text-white mt-1">
+                      {loanSimulation.yearsSavedFormatted}
+                    </p>
+                    <p className="text-[11px] text-slate-400 mt-1">
+                      De {loanSimulation.baselineMonths} a{" "}
+                      {loanSimulation.acceleratedMonths} meses
+                    </p>
+                  </div>
+
+                  <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30">
+                    <span className="text-xs text-amber-300 block">
+                      Esfuerzo sobre Superávit Mensual
+                    </span>
+                    <p className="text-xl font-bold text-white mt-1">
+                      {loanSimulation.surplusPercentageRequired}%
+                    </p>
+                    <p className="text-[11px] text-slate-400 mt-1">
+                      Del flujo libre mensual actual
+                    </p>
+                  </div>
                 </div>
               </div>
             </div>
 
-            {/* Right: Interactive Parametric Prepayment Simulator (Scenario 3) */}
-            <div className="lg:col-span-2 rounded-2xl bg-slate-900/90 border border-slate-800 p-5 space-y-5">
-              <div>
-                <span className="text-[11px] font-semibold uppercase tracking-wider text-indigo-400">
-                  Escenario 3 • Simulador Paramétrico en Tiempo Real
-                </span>
-                <h2 className="text-base font-bold text-white mt-0.5">
-                  ¿Qué pasa si abono capital extraordinario cada mes?
-                </h2>
-              </div>
-
-              {/* Quick Preset Buttons + Slider */}
-              <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-4">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="text-xs text-slate-300">
-                    Abono Adicional Mensual a Capital:
-                  </span>
-                  <span className="text-xl font-bold text-indigo-400">
-                    {fmtQ(extraMonthlyAbono)} / mes
-                  </span>
-                </div>
-
-                <input
-                  type="range"
-                  min={0}
-                  max={10000}
-                  step={250}
-                  value={extraMonthlyAbono}
-                  onChange={(e) => setExtraMonthlyAbono(Number(e.target.value))}
-                  className="w-full accent-indigo-500 cursor-pointer"
-                />
-
-                <div className="flex flex-wrap gap-2">
-                  {[1000, 2500, 5000, 7500].map((preset) => (
-                    <button
-                      key={preset}
-                      onClick={() => setExtraMonthlyAbono(preset)}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition ${
-                        extraMonthlyAbono === preset
-                          ? "bg-indigo-600 border-indigo-500 text-white"
-                          : "bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-800"
-                      }`}
-                    >
-                      + {fmtQ(preset)}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Comparative Simulation Outputs */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30">
-                  <span className="text-xs text-emerald-300 block">
-                    Intereses Futuros Ahorrados
-                  </span>
-                  <p className="text-xl font-bold text-white mt-1">
-                    {fmtQ(loanSimulation.interestSavedGtq)}
-                  </p>
-                  <p className="text-[11px] text-slate-400 mt-1">
-                    Dinero que no pagarás al banco
-                  </p>
-                </div>
-
-                <div className="p-4 rounded-xl bg-indigo-500/10 border border-indigo-500/30">
-                  <span className="text-xs text-indigo-300 block">
-                    Reducción de Plazo Total
-                  </span>
-                  <p className="text-xl font-bold text-white mt-1">
-                    {loanSimulation.yearsSavedFormatted}
-                  </p>
-                  <p className="text-[11px] text-slate-400 mt-1">
-                    De {loanSimulation.baselineMonths} a{" "}
-                    {loanSimulation.acceleratedMonths} meses
-                  </p>
-                </div>
-
-                <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30">
-                  <span className="text-xs text-amber-300 block">
-                    Esfuerzo sobre Superávit Mensual
-                  </span>
-                  <p className="text-xl font-bold text-white mt-1">
-                    {loanSimulation.surplusPercentageRequired}%
-                  </p>
-                  <p className="text-[11px] text-slate-400 mt-1">
-                    Del flujo libre mensual actual
-                  </p>
-                </div>
+            {/* Complete Comparative French Amortization Timeline */}
+            <div className="rounded-2xl bg-slate-900/90 border border-slate-800 p-5 space-y-4">
+              <h3 className="text-sm font-semibold text-white">
+                Proyección Comparativa de Reducción de Saldo (Amortización Francesa)
+              </h3>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="border-b border-slate-800 text-slate-400">
+                      <th className="py-2.5 px-3">Hito Temporal</th>
+                      <th className="py-2.5 px-3 text-right">Saldo Escenario Base</th>
+                      <th className="py-2.5 px-3 text-right">Saldo Acelerado (+{fmtQ(extraMonthlyAbono)})</th>
+                      <th className="py-2.5 px-3 text-right">Diferencia de Capital Reducido</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/60">
+                    {loanSimulation.comparisonSchedule.map((row) => (
+                      <tr key={row.month} className="hover:bg-slate-800/30">
+                        <td className="py-2.5 px-3 font-medium text-slate-300">
+                          Mes #{row.month} (Año {(row.month / 12).toFixed(1)})
+                        </td>
+                        <td className="py-2.5 px-3 text-right text-slate-400">
+                          {fmtQ(row.baselineBalance)}
+                        </td>
+                        <td className="py-2.5 px-3 text-right font-bold text-emerald-400">
+                          {fmtQ(row.acceleratedBalance)}
+                        </td>
+                        <td className="py-2.5 px-3 text-right font-semibold text-indigo-300">
+                          {fmtQ(row.baselineBalance - row.acceleratedBalance)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             </div>
           </div>
@@ -1449,13 +1705,57 @@ export default function FinControlDashboardPage() {
 
               {/* Year-End Run-Rate & Milestones (Module 4.7) */}
               <div className="rounded-2xl bg-slate-900/90 border border-slate-800 p-5 space-y-4">
-                <h2 className="text-sm font-semibold text-white flex items-center gap-2">
-                  <Calendar className="h-4 w-4 text-indigo-400" />
-                  Proyecciones a Cierre de Año & Hitos Calendarizados (4.7)
-                </h2>
-                <p className="text-xs text-slate-400">
-                  Proyección automática basada en el ritmo promedio (run-rate) e hitos extraordinarios de Guatemala (Bono 14, Aguinaldo, Seguros y Colegiaturas).
-                </p>
+                <div className="flex items-center justify-between">
+                  <h2 className="text-sm font-semibold text-white flex items-center gap-2">
+                    <Calendar className="h-4 w-4 text-indigo-400" />
+                    Hitos Calendarizados & Proyecciones (4.7)
+                  </h2>
+                </div>
+
+                {/* Form to add new milestone */}
+                <form onSubmit={handleCreateMilestone} className="grid grid-cols-1 sm:grid-cols-4 gap-2 p-3 rounded-xl bg-slate-950 border border-slate-800">
+                  <input
+                    type="text"
+                    placeholder="Hito (ej. Aguinaldo)"
+                    value={newMsName}
+                    onChange={(e) => setNewMsName(e.target.value)}
+                    className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-white"
+                  />
+                  <select
+                    value={newMsMonth}
+                    onChange={(e) => setNewMsMonth(e.target.value)}
+                    className="px-2 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-white"
+                  >
+                    {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((m) => (
+                      <option key={m} value={m}>
+                        Mes #{m}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    value={newMsKind}
+                    onChange={(e) => setNewMsKind(e.target.value as any)}
+                    className="px-2 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-white"
+                  >
+                    <option value="INCOME_BONUS">Ingreso Extraordinario</option>
+                    <option value="ANNUAL_EXPENSE">Gasto Anual Programado</option>
+                  </select>
+                  <div className="flex gap-2">
+                    <input
+                      type="number"
+                      placeholder="Monto GTQ"
+                      value={newMsAmount}
+                      onChange={(e) => setNewMsAmount(e.target.value)}
+                      className="flex-1 px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-white"
+                    />
+                    <button
+                      type="submit"
+                      className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-xs font-semibold text-white"
+                    >
+                      +
+                    </button>
+                  </div>
+                </form>
 
                 <div className="space-y-3">
                   {milestones.map((m) => (
@@ -1603,7 +1903,7 @@ export default function FinControlDashboardPage() {
                 <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-3">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-semibold text-white">
-                      ¿Es un gasto compartido? (Split Expense)
+                      ¿Es un gasto compartido? (RN-01)
                     </span>
                     <input
                       type="checkbox"
@@ -1682,7 +1982,7 @@ export default function FinControlDashboardPage() {
                         <div className="p-3 rounded-xl bg-indigo-950/40 border border-indigo-500/30 text-xs space-y-1">
                           <div className="flex justify-between">
                             <span className="text-slate-300">
-                              Gasto Personal Real (Impacta Presupuesto):
+                              Gasto Personal Real (Presupuesto):
                             </span>
                             <span className="font-bold text-emerald-400">
                               {fmtQ(liveSplitPreview.personalAmountGtq)}
@@ -1709,7 +2009,7 @@ export default function FinControlDashboardPage() {
                 >
                   {mobSubmitting
                     ? "Sincronizando con PostgreSQL..."
-                    : "Guardar Gasto Express y Sincronizar en Tiempo Real"}
+                    : "Guardar Gasto Express y Sincronizar"}
                 </button>
               </form>
             </div>
@@ -1746,6 +2046,94 @@ export default function FinControlDashboardPage() {
           </div>
         )}
       </main>
+
+      {/* RN-04 Manual Transaction Edit & Override Modal */}
+      {editingTx && (
+        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
+          <div className="max-w-md w-full rounded-2xl bg-slate-900 border border-slate-800 p-6 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+              <h3 className="text-sm font-bold text-white">
+                Ajuste Manual / Auditoría (RN-04)
+              </h3>
+              <button
+                onClick={() => setEditingTx(null)}
+                className="text-slate-400 hover:text-white"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="text-slate-400 block mb-1">Nombre Comercio</label>
+                <input
+                  type="text"
+                  value={editMerchant}
+                  onChange={(e) => setEditMerchant(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white"
+                />
+              </div>
+
+              <div>
+                <label className="text-slate-400 block mb-1">Reclasificar Categoría</label>
+                <select
+                  value={editCategory}
+                  onChange={(e) => setEditCategory(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white"
+                >
+                  {categories.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name} ({c.macro_group})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="text-slate-400 block mb-1">
+                  % Participación Propia ({editSplitPct}%)
+                </label>
+                <input
+                  type="range"
+                  min={1}
+                  max={100}
+                  value={editSplitPct}
+                  onChange={(e) => setEditSplitPct(Number(e.target.value))}
+                  className="w-full accent-indigo-500"
+                />
+                <p className="text-[11px] text-slate-400 mt-1">
+                  Gasto personal calculado:{" "}
+                  <strong className="text-emerald-400">
+                    {fmtQ((editingTx.total_amount_gtq * editSplitPct) / 100)}
+                  </strong>{" "}
+                  • Cuenta por Cobrar:{" "}
+                  <strong className="text-amber-400">
+                    {fmtQ(
+                      editingTx.total_amount_gtq -
+                        (editingTx.total_amount_gtq * editSplitPct) / 100
+                    )}
+                  </strong>
+                </p>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
+              <button
+                onClick={() => setEditingTx(null)}
+                className="px-3 py-1.5 rounded-lg bg-slate-800 text-xs text-slate-300"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleSaveTxOverride}
+                className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-xs font-semibold text-white"
+              >
+                Guardar Ajuste
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
