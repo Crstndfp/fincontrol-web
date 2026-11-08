@@ -13,12 +13,13 @@ flowchart TD
     end
 
     subgraph WebMonolith["💻 Monolito Full-Stack Next.js (fincontrol-web)"]
-        W1["Dropzone Masivo PDF / Tickets"] --> W2["Motor Conciliación Antiduplicidad"]
+        W1["Dropzone Masivo PDF / Tickets\n(Multipart + Extractor)"] --> W2["Motor Conciliación Antiduplicidad"]
         A4 -->|POST /api/v1/transactions| W2
         W2 --> W3["Neutralizador Transferencias Internas (RN-02)"]
         W3 --> W4["Motor Presupuestario 50/30/20 & Reglas"]
-        W4 --> W5["Simulador Hipotecario & Proyecciones"]
-        W4 --> W6["Balance Patrimonial & Auditoría Totalero TC"]
+        W4 --> W5["Simulador Hipotecario & Proyecciones (4.5)"]
+        W4 --> W6["Balance Patrimonial & Auditoría Totalero TC (4.4/4.6)"]
+        W4 --> W7["Gestor de Hitos y Cierre Anual (4.7)"]
     end
 
     subgraph Database["🗄️ Persistencia (Docker)"]
@@ -29,6 +30,7 @@ flowchart TD
     W4 <--> PG
     W5 <--> PG
     W6 <--> PG
+    W7 <--> PG
 ```
 
 ---
@@ -37,7 +39,13 @@ flowchart TD
 
 ### ADR-01: Monolito Unificado en Next.js (App Router) + PostgreSQL 16
 - **Contexto:** Se requiere una interfaz web de alta densidad analítica y un backend seguro para sincronizar la app Android sin sobrecarga operativa de mantener múltiples servidores backend separados.
-- **Decisión:** Utilizar **Next.js (TypeScript + Tailwind CSS)** como solución unificada. Las vistas de escritorio consumen datos directamente y los Route Handlers (`/api/v1/dashboard`, `/api/v1/transactions`, `/api/v1/reconcile`, `/api/v1/rules`) sirven tanto a la web como a la aplicación nativa Android.
+- **Decisión:** Utilizar **Next.js (TypeScript + Tailwind CSS)** como solución unificada. Las vistas de escritorio consumen datos directamente y los Route Handlers sirven tanto a la web como a la aplicación nativa Android:
+  - `GET /api/v1/dashboard`: Datos consolidados (cuentas, presupuestos, transacciones, cuotas, simulador).
+  - `POST /api/v1/transactions`: Registro express y sincronización móvil con cálculo split.
+  - `PATCH /api/v1/transactions/[id]`: Reclasificación y auditoría manual (`RN-04`).
+  - `POST /api/v1/reconcile`: Ingesta multipart/form-data de PDFs de bancos y tickets con extracción de transacciones y neutralización de transferencias propias (`RN-02`).
+  - `POST /api/v1/installments`: Gestión de compras en Visa Cuotas a tasa 0% y avance de mensualidades.
+  - `POST /api/v1/milestones`: Registro de hitos calendarizados (Bono 14, Aguinaldo) para proyecciones a fin de año.
 - **Base de Datos:** **PostgreSQL 16** contenerizado en Docker con tipos `NUMERIC(14,2)` estrictos para evitar errores de coma flotante en cálculos bimonetarios (`GTQ` y `USD`).
 
 ### ADR-02: Tratamiento Contable de Gastos Compartidos (`RN-01`)
@@ -48,3 +56,6 @@ flowchart TD
 ### ADR-03: Motor de Conciliación Antiduplicidad y Neutralización (`RN-02`)
 1. **Emparejamiento Móvil ↔ PDF Bancario:** Todo gasto registrado desde Android ingresa con estado `PENDING_STATEMENT_MATCH`. Al cargar el PDF del estado de cuenta bancario en la web, el motor busca coincidencias por `(cuenta, moneda, monto exacto, ventana de ±3 días)` y los fusiona en un único registro `RECONCILED_MERGED`, preservando la foto del ticket y notas móviles.
 2. **Aislamiento de Transferencias Internas (`RN-02`):** Los pagos de tarjeta de crédito desde cuentas monetarias propias (`BANCA MOVIL` ↔ `GRACIAS POR SU PAGO`) se emparejan automáticamente por monto y ventana temporal de 72 horas, etiquetándose como `INTERNAL_TRANSFER` para no inflar ingresos ni gastos operativos.
+
+### ADR-04: Reversibilidad Total de Asignaciones y Auditoría (`RN-04`)
+- Cualquier asignación automatizada o clasificación predictiva puede ser ajustada manualmente por el usuario. Al modificarse, el registro se marca con `is_manual_override = true` impidiendo que futuras cargas automáticas de estados de cuenta sobreescriban la decisión contable del usuario.
